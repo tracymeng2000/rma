@@ -41,6 +41,7 @@
 #include "experiments/step_idls.hpp"
 #include "experiments/step_insert_lookup.hpp"
 #include "experiments/step_insert_scan.hpp"
+#include "experiments/custom.hpp"
 
 #include "adaptive/basic/apma_baseline.hpp"
 
@@ -421,6 +422,15 @@ void initialise() {
         LOG_VERBOSE("Experiment step_insert_scan with initial_size: " << initial_size << ", final_size: " << final_size << ", step_size: " << step_size << ", num_lookups: " << num_lookups << ", num_scans: " << num_scans);
         return make_unique<ExperimentStepInsertScan>(interface, initial_size, final_size, step_size, num_lookups, num_scans);
     });
+
+    /**
+     * Experiment step_insert_scan
+     */
+    REGISTER_EXPERIMENT("custom", "Insert some customized values",
+            [](shared_ptr<Interface> interface){
+        return make_unique<ExperimentCustom>(interface);
+    });
+
 
     /**
      * IDLS experiment

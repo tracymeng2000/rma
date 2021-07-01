@@ -73,6 +73,7 @@ struct PMA {
     size_t m_segment_capacity; // the capacity of a single segment
     size_t m_height; // the height of the binary tree for elements
     size_t m_cardinality; // the number of elements contained
+    size_t* m_segment_sizes;
 };
 
 
@@ -443,6 +444,8 @@ public:
 
     // Dump the content of the data structure to stdout (for debugging purposes)
     virtual void dump() const override;
+
+    void print() const;
 };
 
 
