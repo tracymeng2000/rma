@@ -21,9 +21,8 @@ namespace pma {
 
 	using KeyValue = std::pair<int64_t, int64_t>;
 
-	// for now, manually modify N_inserts here
 	ExperimentCustom::ExperimentCustom(std::shared_ptr<Interface> pma) :
-		interface(pma), N_inserts(10){
+		interface(pma){
 			if(pma.get() == nullptr) RAISE("The pointer data structure is NULL");
 		}
 
@@ -47,17 +46,26 @@ namespace pma {
 
 	void ExperimentCustom::do_inserts(Interface* pma){
 		// modify the array here to customize what's inserted
-		KeyValue kv[] = {{10, 10}, {-2,11}, {20, 20}, {-14,14}, {21, 21}, {15, 15}, {16, 16}, {19, 19},{22, 22}, {-5, 25}};
-		for(size_t i = 0; i < N_inserts; i++){
-			pma->insert(kv[i].first, kv[i].second);
+		int key = 0, value = 0;
+		while(!cin.eof()){
+			cout << "Enter the key" << endl;
+			cin >> key;
+			cout << "Enter the value" << endl;
+			cin >> value;
+			pma->insert(key, value);
 		}
+		//KeyValue kv[] = {{10, 10}, {-2,11}, {20, 20}, {-14,14}, {21, 21}, {15, 15}, {-16, 16}, {19, 19},{22, 22}, {-5, 25},
+				//{13,5},{7,12},{8,9},{-3,4},{-18,21},{-20,-20},{-19,19},{-25,1},{-23,8}, {-24, 0}, {-30,5}};
+		//for(size_t i = 0; i < N_inserts; i++){
+		//	pma->insert(kv[i].first, kv[i].second);
+		//}
 	}
 
 	void ExperimentCustom::run() {
 		auto pma = interface.get();
 		Timer aux_timer;
 
-		cout << "Inserting " << N_inserts << " elements ..." << endl;
+		// cout << "Inserting " << N_inserts << " elements ..." << endl;
 		aux_timer.reset(true);
 		do_inserts(pma); 
 		aux_timer.stop();
@@ -65,11 +73,11 @@ namespace pma {
 		cout << "# Insertion time: " << t_insert << " millisecs" << endl;
 
 		// save the result
-		config().db()->add("custom")
-			("type", "insert")
-			("initial_size", (size_t) 0)
-			("elements", N_inserts)
-			("time", t_insert);
+		// config().db()->add("custom")
+		//	("type", "insert")
+	//		("initial_size", (size_t) 0)
+	//		("elements", N_inserts)
+	//		("time", t_insert);
 
 
 		aux_timer.reset(true);
@@ -79,7 +87,6 @@ namespace pma {
 		if(t_build > 0){
 			cout << "# Build time: " << t_build << " millisecs" << endl;
 		}
-		assert(interface->size() == N_inserts);
 	}
 
 } /* namespace pma */

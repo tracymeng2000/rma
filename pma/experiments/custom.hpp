@@ -15,7 +15,6 @@ class Interface;
  */
 struct ExperimentCustom: public Experiment {
     std::shared_ptr<Interface> interface; // the data structure to evaluate
-    const size_t N_inserts; // number of elements to insert
     bool thread_pinned = false; // keep track if we have pinned the thread
 
     void do_inserts(Interface* pma);

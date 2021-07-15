@@ -34,7 +34,7 @@ namespace pma {
  *   DEBUG                                                                   *
  *                                                                           *
  *****************************************************************************/
-//#define DEBUG
+// #define DEBUG
 #if defined(DEBUG)
     #define COUT_DEBUG(msg) COUT_DEBUG_FORCE(msg)
 #else
@@ -299,6 +299,8 @@ APMA_Baseline::APMA_Baseline() : APMA_Baseline(4, 4) { }
 
 APMA_Baseline::APMA_Baseline(size_t index_B, size_t storage_B, double predictor_scale) :
         index(index_initialize(index_B, storage_B)), storage(), predictor(max(4, (int) predictor_scale), 1), predictor_scale(predictor_scale){
+
+    index.root = create_leaf();
     storage_initialize(storage_min_capacity);
 
     // check the predictor scale
@@ -311,6 +313,8 @@ APMA_Baseline::APMA_Baseline(size_t index_A, size_t index_B, size_t storage_A, s
         index( index_initialize(index_A, index_B, index_A, index_B, storage_A, storage_B) ),
         storage(),
         predictor(max(4, (int) predictor_scale), 1), predictor_scale(predictor_scale) {
+
+    index.root = create_leaf();
     storage_initialize(storage_min_capacity);
 
     // check the predictor scale
@@ -326,10 +330,16 @@ APMA_Baseline::~APMA_Baseline() {
 }
 
 BTree APMA_Baseline::index_initialize(size_t index_B, size_t storage_B){
+	
     return index_initialize(index_B /2, index_B, index_B /2, index_B, storage_B /2 , storage_B);
 }
 
 BTree APMA_Baseline::index_initialize(size_t intnode_a, size_t intnode_b, size_t leaf_a, size_t leaf_b, size_t storage_a, size_t storage_b){
+	COUT_DEBUG("intnode_a " << intnode_a);
+	COUT_DEBUG("intnode_b " << intnode_b);
+	COUT_DEBUG("leaf_a" << leaf_a);
+	COUT_DEBUG("leaf_b" << leaf_b);
+
     if(intnode_a <= 1) throw std::invalid_argument("intnode_a <= 1");
     if(2 * intnode_a > intnode_b) throw std::invalid_argument("2* intnode_a > intnode_b");
     if(leaf_a <= 1) throw std::invalid_argument("leaf_a <= 1");
@@ -338,7 +348,6 @@ BTree APMA_Baseline::index_initialize(size_t intnode_a, size_t intnode_b, size_t
     if(2 * storage_a > storage_b) throw std::invalid_argument("2* storage_a > storage_b");
 
     BTree storage{intnode_a, intnode_b, leaf_a, leaf_b, storage_a, storage_b, nullptr};
-    storage.root = create_leaf();
 
     return storage;
 }
@@ -455,7 +464,7 @@ void APMA_Baseline::apma_compute_rec(vector<uint16_t>& partitions, int64_t parti
         size_t fill_max = cardinality - size_min;
 
         size_t index_start = storage.m_segment_capacity * segment_start; // inclusive
-//        size_t index_end = index_start + num_segments * m_storage.m_segment_capacity; // exclusive
+//        size_t index_end = index_start + num_segments * storage.m_segment_capacity; // exclusive
 
         size_t start = max(size_min, fill_min);
         size_t end = min(size_max, fill_max);
@@ -613,8 +622,12 @@ void APMA_Baseline::storage_spread(const std::vector<uint16_t>& partitions, Leaf
     element_t* __restrict workspace = workspace_ptr.get();
 
     // find the first valid index for a leaf. We may need to check backward or ahead
-    size_t index_next = window_start * storage.m_segment_capacity;
-    size_t index_last = (window_end -1) * storage.m_segment_capacity + storage_get_segment_cardinality(window_end -1) -1;
+    size_t index_next = window_start % 2 == 0?
+	    (window_start + 1) * storage.m_segment_capacity - storage_get_segment_cardinality(window_start)
+	    : window_start * storage.m_segment_capacity;
+    size_t index_last = window_end % 2 == 0?
+	    window_end * storage.m_segment_capacity - 1
+	    : (window_end -1) * storage.m_segment_capacity + storage_get_segment_cardinality(window_end -1) -1;
     size_t value_leaf = -1;
     if(values(leaf)[index_leaf] < index_next){
         do {
@@ -646,10 +659,13 @@ void APMA_Baseline::storage_spread(const std::vector<uint16_t>& partitions, Leaf
     }
 
     // copy the elements in the workspace
-    size_t pos = 0; // current position in the workspace
     for(size_t i = 0; i < window_length; i++){
         size_t segment_cardinality = partitions[i];
         assert(segment_cardinality < storage.m_segment_capacity && "There should be at least one empty slot in each segment");
+	size_t segment_id_in_storage = (window_start + i);
+	size_t pos = segment_id_in_storage % 2 == 0?
+		(i + 1) * storage.m_segment_capacity - segment_cardinality 
+		: i * storage.m_segment_capacity; 
 
         for(size_t j = 0; j < segment_cardinality; j++){
             workspace[pos] = storage.m_elements[index_next];
@@ -672,12 +688,6 @@ void APMA_Baseline::storage_spread(const std::vector<uint16_t>& partitions, Leaf
             // move to the next position in the workspace / dest PMA
             pos++;
         }
-
-        // set to -1 the remaining elements in the workspace array
-        for(size_t j = 0, end = storage.m_segment_capacity - segment_cardinality; j < end; j++){
-       //     workspace[pos].key = -1;
-		pos++;
-	}
     }
     // copy the elements back from the workspace to the PMA
     memcpy(storage.m_elements + window_start * storage.m_segment_capacity, workspace, window_length * storage.m_segment_capacity * sizeof(element_t));
@@ -716,12 +726,12 @@ void APMA_Baseline::storage_resize(){
     COUT_DEBUG("elements per segment: " << elements_per_segment << ", odd segments: " << odd_segments << ", num segments: " << num_segments << ", segment capacity: " << segment_capacity);
 
     size_t inserted_elements = 0;
-    assert(!storage_is_cell_empty(0) && "The first position should not be empty");
-    size_t index_next = 0; // the next index to copy from the PMA being resized
+    size_t index_next = storage.m_segment_capacity - storage.m_segment_sizes[0]; // the next index to copy from the PMA being resized
 
+    bool output_segment_odd = false; // even or odd segment id
     for(size_t i = 0; i < num_segments; i++){
         size_t segment_cardinality = elements_per_segment + (i < odd_segments);
-        size_t current_index = i * segment_capacity;
+        size_t current_index = output_segment_odd? i * segment_capacity : ((i+1) * segment_capacity - segment_cardinality);
 	segment_sizes[i] = segment_cardinality;
         for(size_t j = 0; j < segment_cardinality; j++){
             // copy the element
@@ -749,6 +759,7 @@ void APMA_Baseline::storage_resize(){
                 do{ index_next++; } while ( storage_is_cell_empty(index_next) );
             }
         }
+	output_segment_odd = !output_segment_odd;
     }
 
     // clean up
@@ -773,16 +784,14 @@ size_t APMA_Baseline::storage_get_num_segments() const {
 
 bool APMA_Baseline::storage_is_segment_full(size_t segment_id) const {
     assert(segment_id < storage_get_num_segments() && "Invalid index for the segment id, overflow");
-    return !storage_is_cell_empty((1+segment_id) * storage.m_segment_capacity -1);
+    return storage.m_segment_sizes[segment_id] == storage.m_segment_capacity;
 }
 
 size_t APMA_Baseline::storage_get_segment_cardinality(size_t segment_id) const{
-    assert(segment_id < storage_get_num_segments() && "Invalid index for the segment id, overflow");
-    int64_t start = segment_id * storage.m_segment_capacity;
-    int64_t pos = start + storage.m_segment_capacity - 1;
-    assert(pos < storage.m_capacity && "Index out of bounds");
-    while(pos > start && storage_is_cell_empty(pos)) pos--;
-    return pos +1 - start;
+	// older code was looping through storage in the given segment
+	// in newer code, m_segment_sizes[segment_id] is directly used
+	// modified this function so all calls to storage_get_segment_cardinality works
+    return storage.m_segment_sizes[segment_id];
 }
 
 /*****************************************************************************
@@ -923,11 +932,12 @@ void APMA_Baseline::insert_empty(int64_t key, int64_t value){
     COUT_DEBUG("key: " << key << ", value: " << value);
 
     Leaf* leaf = reinterpret_cast<Leaf*>(index.root);
-    values(leaf)[0] = 0;
+    size_t insert_index = storage.m_segment_capacity - 1;
+    values(leaf)[0] = insert_index; 
     cardinalities(leaf)[0] = 1;
     leaf->N = 1;
     assert(storage.m_capacity > 0 && "The storage does not have any capacity?");
-    storage.m_elements[0] = element_t{key, value};
+    storage.m_elements[insert_index] = element_t{key, value};
     storage.m_cardinality = 1;
     storage.m_segment_sizes[0] = 1;
 }
@@ -996,6 +1006,7 @@ void APMA_Baseline::index_leaf_augment(Leaf* leaf, size_t pos){
 
 void APMA_Baseline::insert_storage(Leaf* leaf, size_t index_leaf, int64_t key, int64_t value){
     uint64_t* values_leaf = values(leaf);
+    COUT_DEBUG("index_leaf " << index_leaf);
     size_t pos = values_leaf[index_leaf];
     COUT_DEBUG("pointed position from the index: " << pos);
 
@@ -1007,34 +1018,48 @@ void APMA_Baseline::insert_storage(Leaf* leaf, size_t index_leaf, int64_t key, i
 
     // the slot where we will insert the element
     size_t index_insert {0};
+    size_t segment_id = pos / storage.m_segment_capacity;
 
     // edge case, we are trying to insert a new maximum for the PMA
     if(pos == storage.m_capacity){
-        size_t last_segment = storage_get_num_segments() -1;
-        index_insert = last_segment * storage.m_segment_capacity + storage_get_segment_cardinality(last_segment);
-        assert(storage_is_cell_empty(index_insert) && "We should have landed to an empty slot");
-    } else { // find an empty slot on the right
-        int64_t j = pos;
-        int64_t capacity = storage.m_capacity;
-        while(j < capacity && !storage_is_cell_empty(j)) j++;
-        assert(static_cast<size_t>(j) < storage.m_capacity && "An empty slot on the right is always expected to be found!");
-        storage_shift_right(leaf, index_leaf, pos, j - pos);
-        index_insert = pos;
+	    segment_id -= 1;
+    }
+    COUT_DEBUG("segment_id: " << segment_id);
+    int64_t capacity = storage.m_capacity;
+    size_t sz = storage.m_segment_sizes[segment_id];
+    if(segment_id % 2 == 0){
+	    size_t stop = (segment_id + 1) * storage.m_segment_capacity - 1;
+	    size_t start = (segment_id + 1)* storage.m_segment_capacity - sz - 1;
+	    size_t i = start;
 
-        assert(((index_insert / storage.m_segment_capacity) == (j / storage.m_segment_capacity)) &&
-                "Expected to expand the same segment where the element has been inserted");
+	    // shift values left
+	    while(i < stop && storage.m_elements[i+1].key < key){
+		    storage.m_elements[i] = storage.m_elements[i+1];
+		    ++i;
+	    }
+	    index_insert = i;
+    }else{
+	    size_t stop = segment_id * storage.m_segment_capacity;
+	    size_t start = segment_id * storage.m_segment_capacity + sz;
+	    size_t i = start;
+
+	    // shift values right 
+	    while(i > stop && storage.m_elements[i-1].key > key){
+		    storage.m_elements[i] = storage.m_elements[i-1];
+		    --i;
+	    }
+	    index_insert = i;
     }
 
+    COUT_DEBUG("index_insert: " << index_insert);
     // insert the element
     storage.m_elements[index_insert] = element_t{key, value};
-    // storage_set_presence<true>(index_insert);
     storage.m_cardinality++;
 
     if(index_insert < values_leaf[index_leaf]){
         values_leaf[index_leaf] = index_insert;
     }
 
-    size_t segment_id = index_insert / storage.m_segment_capacity;
     storage.m_segment_sizes[segment_id]++;
 
     // update the entry in the predictor
@@ -1045,10 +1070,13 @@ void APMA_Baseline::insert_storage(Leaf* leaf, size_t index_leaf, int64_t key, i
 }
 
 bool APMA_Baseline::storage_is_cell_empty(size_t pos) const{
-    assert(pos < storage.m_capacity);
     // return storage.m_elements[pos].key < 0;
     size_t segment_id = pos / storage.m_segment_capacity;
-    return pos % storage.m_segment_capacity >= storage.m_segment_sizes[segment_id];
+    if(segment_id % 2 == 0){// even segment
+	    return pos % storage.m_segment_capacity < storage.m_segment_capacity - storage.m_segment_sizes[segment_id];
+    }else{ // odd segment
+	    return pos % storage.m_segment_capacity >= storage.m_segment_sizes[segment_id];
+    }
 }
 
 // increase the cardinality of the segment containing the position `end'
@@ -1487,15 +1515,27 @@ void APMA_Baseline::dump_predictor(std::ostream& out) const {
 }
 
 void APMA_Baseline::print() const{
+	bool odd_segment = false;
 	for(int i = 0; i < storage_get_num_segments(); ++i){
 		int j;
-		for(j = 0; j < storage.m_segment_sizes[i]; ++j){
-			std::cout << storage.m_elements[i * storage.m_segment_capacity + j].key << " "; 
+		if(!odd_segment){
+			for(j = 0; j < storage.m_segment_capacity - storage.m_segment_sizes[i]; ++j){
+				std::cout << "e" << " "; 
+			}
+			while(j< storage.m_segment_capacity){
+				std::cout << storage.m_elements[i * storage.m_segment_capacity + j].key << " "; 
+				++j;
+			}
+		}else{
+			for(j = 0; j < storage.m_segment_sizes[i]; ++j){
+				std::cout << storage.m_elements[i * storage.m_segment_capacity + j].key << " "; 
+			}
+			while(j++ < storage.m_segment_capacity){
+				std::cout << "e" << " "; 
+			}
 		}
-		while(j++ < storage.m_segment_capacity){ // empty cells
-			std::cout << "-" << " ";
-		}
-		std::cout << "|";
+		cout << "|"; // print a segment separator
+		odd_segment = !odd_segment;
 	}
 	std::cout << std::endl;
 	for(int i = 0; i < storage_get_num_segments(); ++i){
